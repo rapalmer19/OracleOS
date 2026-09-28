@@ -53,7 +53,7 @@ const sections: Section[] = [
   },
 ];
 
-const queue: QueueItem[] = [
+const initialQueue: QueueItem[] = [
   { id: '1', name: 'Maya L.', handle: '@moonmirror', reading: 'Mini Read', status: 'Queue' },
   { id: '2', name: 'Dre C.', handle: '@drevisions', reading: 'Deep Read', status: 'Reading' },
   { id: '3', name: 'Sofia R.', handle: '@softoracle', reading: 'Mini Read', status: 'Done' },
@@ -67,7 +67,26 @@ const statusColors: Record<ReadingStatus, string> = {
 
 export default function App() {
   const [activeKey, setActiveKey] = useState<SectionKey>('user');
+  const [openSlots, setOpenSlots] = useState(3);
+  const [queueItems, setQueueItems] = useState<QueueItem[]>(initialQueue);
   const active = useMemo(() => sections.find((section) => section.key === activeKey) ?? sections[0], [activeKey]);
+
+  const addMockReading = (reading: string) => {
+    setQueueItems((items) => [
+      ...items,
+      {
+        id: String(Date.now()),
+        name: 'New Client',
+        handle: '@newclient',
+        reading,
+        status: 'Queue',
+      },
+    ]);
+  };
+
+  const moveReading = (id: string, status: ReadingStatus) => {
+    setQueueItems((items) => items.map((item) => (item.id === id ? { ...item, status } : item)));
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: active.background }]}>
@@ -90,8 +109,17 @@ export default function App() {
           <Text style={styles.title}>{active.title}</Text>
           <Text style={styles.subtitle}>{active.subtitle}</Text>
 
-          {active.key === 'user' ? <UserSection accent={active.accent} /> : null}
-          {active.key === 'admin' ? <AdminSection accent={active.accent} /> : null}
+          {active.key === 'user' ? <UserSection accent={active.accent} onAddReading={addMockReading} queueItems={queueItems} /> : null}
+          {active.key === 'admin' ? (
+            <AdminSection
+              accent={active.accent}
+              onAddSlot={() => setOpenSlots((slots) => slots + 1)}
+              onMoveReading={moveReading}
+              onRemoveSlot={() => setOpenSlots((slots) => Math.max(0, slots - 1))}
+              openSlots={openSlots}
+              queueItems={queueItems}
+            />
+          ) : null}
           {active.key === 'account' ? <AccountSection accent={active.accent} /> : null}
         </ScrollView>
 
@@ -116,7 +144,7 @@ export default function App() {
   );
 }
 
-function UserSection({ accent }: { accent: string }) {
+function UserSection({ accent, onAddReading, queueItems }: { accent: string; onAddReading: (reading: string) => void; queueItems: QueueItem[] }) {
   return (
     <View style={styles.sectionStack}>
       <Panel accent={accent} label="SEARCH">
@@ -135,21 +163,35 @@ function UserSection({ accent }: { accent: string }) {
       <Panel accent={accent} label="PURCHASE">
         <Text style={styles.panelTitle}>Pay for a Reading</Text>
         <View style={styles.offerRow}>
-          <OfferCard title="Mini Read" price="$11" />
-          <OfferCard title="Deep Read" price="$22" />
+          <OfferCard onPress={() => onAddReading('Mini Read')} title="Mini Read" price="$11" />
+          <OfferCard onPress={() => onAddReading('Deep Read')} title="Deep Read" price="$22" />
         </View>
-        <Text style={styles.panelNote}>Later this opens Stripe Checkout / Payment Sheet. OracleOS never stores raw card numbers.</Text>
+        <Text style={styles.panelNote}>Alpha mode: tapping a card adds a mock paid reading to the queue. Later this opens Stripe Checkout / Payment Sheet.</Text>
       </Panel>
 
       <Panel accent={accent} label="QUEUE">
         <Text style={styles.panelTitle}>Public Queue Preview</Text>
-        {queue.map((item) => <QueueRow item={item} key={item.id} />)}
+        {queueItems.map((item) => <QueueRow item={item} key={item.id} />)}
       </Panel>
     </View>
   );
 }
 
-function AdminSection({ accent }: { accent: string }) {
+function AdminSection({
+  accent,
+  onAddSlot,
+  onMoveReading,
+  onRemoveSlot,
+  openSlots,
+  queueItems,
+}: {
+  accent: string;
+  onAddSlot: () => void;
+  onMoveReading: (id: string, status: ReadingStatus) => void;
+  onRemoveSlot: () => void;
+  openSlots: number;
+  queueItems: QueueItem[];
+}) {
   return (
     <View style={styles.sectionStack}>
       <Panel accent={accent} label="LOGIN GATE">
@@ -160,15 +202,15 @@ function AdminSection({ accent }: { accent: string }) {
       <Panel accent={accent} label="SLOTS">
         <Text style={styles.panelTitle}>Reading Slots</Text>
         <View style={styles.counterRow}>
-          <Pressable style={[styles.actionButton, { borderColor: `${accent}aa` }]}><Text style={styles.actionText}>− Remove Slot</Text></Pressable>
-          <Text style={styles.slotCount}>3 open</Text>
-          <Pressable style={[styles.actionButton, { borderColor: `${accent}aa` }]}><Text style={styles.actionText}>+ Add Slot</Text></Pressable>
+          <Pressable onPress={onRemoveSlot} style={[styles.actionButton, { borderColor: `${accent}aa` }]}><Text style={styles.actionText}>− Remove Slot</Text></Pressable>
+          <Text style={styles.slotCount}>{openSlots} open</Text>
+          <Pressable onPress={onAddSlot} style={[styles.actionButton, { borderColor: `${accent}aa` }]}><Text style={styles.actionText}>+ Add Slot</Text></Pressable>
         </View>
       </Panel>
 
       <Panel accent={accent} label="QUEUE CONTROL">
         <Text style={styles.panelTitle}>Move Status</Text>
-        {queue.map((item) => <AdminQueueRow accent={accent} item={item} key={item.id} />)}
+        {queueItems.map((item) => <AdminQueueRow accent={accent} item={item} key={item.id} onMoveReading={onMoveReading} />)}
       </Panel>
     </View>
   );
@@ -210,12 +252,13 @@ function Panel({ accent, children, label }: { accent: string; children: React.Re
   );
 }
 
-function OfferCard({ price, title }: { price: string; title: string }) {
+function OfferCard({ onPress, price, title }: { onPress: () => void; price: string; title: string }) {
   return (
-    <View style={styles.offerCard}>
+    <Pressable onPress={onPress} style={styles.offerCard}>
       <Text style={styles.offerTitle}>{title}</Text>
       <Text style={styles.offerPrice}>{price}</Text>
-    </View>
+      <Text style={styles.mockButtonText}>Mock Book</Text>
+    </Pressable>
   );
 }
 
@@ -231,13 +274,13 @@ function QueueRow({ item }: { item: QueueItem }) {
   );
 }
 
-function AdminQueueRow({ accent, item }: { accent: string; item: QueueItem }) {
+function AdminQueueRow({ accent, item, onMoveReading }: { accent: string; item: QueueItem; onMoveReading: (id: string, status: ReadingStatus) => void }) {
   return (
     <View style={styles.adminQueueCard}>
       <QueueRow item={item} />
       <View style={styles.statusButtons}>
         {(['Queue', 'Reading', 'Done'] as ReadingStatus[]).map((status) => (
-          <Pressable key={status} style={[styles.statusButton, { borderColor: item.status === status ? accent : '#ffffff22' }]}>
+          <Pressable key={status} onPress={() => onMoveReading(item.id, status)} style={[styles.statusButton, { borderColor: item.status === status ? accent : '#ffffff22' }]}>
             <Text style={[styles.statusButtonText, { color: item.status === status ? accent : '#ffffff88' }]}>{status}</Text>
           </Pressable>
         ))}
@@ -285,6 +328,7 @@ const styles = StyleSheet.create({
   offerCard: { backgroundColor: '#ffffff0f', borderRadius: 18, flex: 1, padding: 14 },
   offerTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
   offerPrice: { color: '#fff', fontSize: 26, fontWeight: '900', marginTop: 8 },
+  mockButtonText: { color: '#ffffff88', fontSize: 11, fontWeight: '900', letterSpacing: 1.5, marginTop: 10, textTransform: 'uppercase' },
   queueRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10 },
   queueName: { color: '#fff', fontSize: 15, fontWeight: '800' },
   queueMeta: { color: '#ffffff80', fontSize: 12, marginTop: 3 },
